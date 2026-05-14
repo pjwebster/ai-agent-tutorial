@@ -1,22 +1,29 @@
-# AI Agent Tutorial Container - Google Gemini
+# AI Agent Tutorial Container - Google Gemini via Vertex AI
 # Build: podman build -t ai-agent-gemini -f Containerfile .
-# Run:   podman run -it --rm -e GOOGLE_API_KEY="your-key" ai-agent-gemini
+# Run:   podman run -it --rm -e GCP_PROJECT_ID="your-project-id" -e GCP_QUOTA_PROJECT_ID="quota-project-id" ai-agent-gemini
 
 FROM python:3.11-slim
 
 # Set metadata
-LABEL description="AI Agent Tutorial - Learn to build AI agents with Google Gemini API"
+LABEL description="AI Agent Tutorial - Learn to build AI agents with Google Gemini via Vertex AI"
 LABEL maintainer="AI Agent Tutorial"
-LABEL version="1.0"
+LABEL version="2.0"
 
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies (if needed)
+# Install system dependencies including gcloud CLI
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     vim \
     less \
+    curl \
+    apt-transport-https \
+    ca-certificates \
+    gnupg \
+    && echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | tee -a /etc/apt/sources.list.d/google-cloud-sdk.list \
+    && curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key --keyring /usr/share/keyrings/cloud.google.gpg add - \
+    && apt-get update && apt-get install -y google-cloud-cli \
     && rm -rf /var/lib/apt/lists/*
 
 # Upgrade pip
@@ -24,7 +31,9 @@ RUN pip install --no-cache-dir --upgrade pip
 
 # Install Python dependencies
 RUN pip install --no-cache-dir \
+    google-cloud-aiplatform \
     google-generativeai \
+    anthropic[vertex] \
     python-dotenv
 
 # Copy tutorial files
@@ -37,11 +46,14 @@ COPY README.md* . 2>/dev/null || true
 # Create output directory for agent-generated files
 RUN mkdir -p /app/output
 
+# Create gcloud config directory
+RUN mkdir -p /root/.config/gcloud
+
 # Create a welcome script
 RUN echo '#!/bin/bash\n\
 echo ""\n\
 echo "╔══════════════════════════════════════════════════════════════════╗"\n\
-echo "║      AI Agent Tutorial - Interactive Container (Gemini)         ║"\n\
+echo "║   AI Agent Tutorial - Gemini via Vertex AI (GCP)                ║"\n\
 echo "╚══════════════════════════════════════════════════════════════════╝"\n\
 echo ""\n\
 echo "📚 Available Files:"\n\
@@ -51,47 +63,154 @@ echo "   • simple_agent_example.py - Ready-to-run example"\n\
 echo "   • ai_agent_tutorial.py   - Comprehensive tutorial"\n\
 echo ""\n\
 echo "🚀 Quick Commands:"\n\
-echo "   • python simple_agent_example.py  - Run the simple example"\n\
-echo "   • less QUICKSTART.md              - Read the quick start"\n\
-echo "   • vim simple_agent_example.py     - Edit and experiment"\n\
+echo "   • gcloud init                              - Initialize gcloud"\n\
+echo "   • gcloud auth application-default login    - Authenticate"\n\
+echo "   • run-tutorial setup                       - Complete setup"\n\
+echo "   • python simple_agent_example.py           - Run example"\n\
 echo ""\n\
-echo "🔑 API Key Status:"\n\
-if [ -z "$GOOGLE_API_KEY" ]; then\n\
-    echo "   ⚠️  GOOGLE_API_KEY not set!"\n\
-    echo "   Run with: podman run -it --rm -e GOOGLE_API_KEY=\"your-key\" ai-agent-gemini"\n\
+echo "🔑 Configuration Status:"\n\
+if [ -z "$GCP_PROJECT_ID" ]; then\n\
+    echo "   ⚠️  GCP_PROJECT_ID not set!"\n\
 else\n\
-    echo "   ✅ API key is configured"\n\
+    echo "   ✅ GCP_PROJECT_ID: $GCP_PROJECT_ID"\n\
+    export ANTHROPIC_VERTEX_PROJECT_ID="$GCP_PROJECT_ID"\n\
 fi\n\
+\n\
+if [ -z "$GCP_QUOTA_PROJECT_ID" ]; then\n\
+    echo "   ⚠️  GCP_QUOTA_PROJECT_ID not set!"\n\
+else\n\
+    echo "   ✅ GCP_QUOTA_PROJECT_ID: $GCP_QUOTA_PROJECT_ID"\n\
+fi\n\
+\n\
+if [ -z "$GCP_PROJECT_ID" ] || [ -z "$GCP_QUOTA_PROJECT_ID" ]; then\n\
+    echo ""\n\
+    echo "Run with:"\n\
+    echo "  podman run -it --rm \\\\"\n\
+    echo "    -e GCP_PROJECT_ID=\"your-project\" \\\\"\n\
+    echo "    -e GCP_QUOTA_PROJECT_ID=\"your-quota-project\" \\\\"\n\
+    echo "    ai-agent-gemini"\n\
+fi\n\
+\n\
 echo ""\n\
-echo "💡 Tip: All files are in /app - use ls to see them"\n\
+echo "🔐 Next Steps:"\n\
+echo "   1. Run: gcloud init"\n\
+echo "   2. Run: gcloud auth application-default login"\n\
+echo "   3. Run: gcloud auth application-default set-quota-project $GCP_QUOTA_PROJECT_ID"\n\
+echo "   4. Run: python simple_agent_example.py"\n\
+echo ""\n\
+echo "   Or simply run: run-tutorial setup (does all steps)"\n\
+echo ""\n\
+echo "💡 Tip: Your gcloud config persists if you mount ~/.config/gcloud"\n\
 echo ""\n\
 ' > /usr/local/bin/welcome.sh && chmod +x /usr/local/bin/welcome.sh
 
+# Create setup script for authentication
+RUN echo '#!/bin/bash\n\
+set -e\n\
+\n\
+if [ -z "$GCP_PROJECT_ID" ]; then\n\
+    echo "❌ Error: GCP_PROJECT_ID environment variable is not set"\n\
+    exit 1\n\
+fi\n\
+\n\
+if [ -z "$GCP_QUOTA_PROJECT_ID" ]; then\n\
+    echo "❌ Error: GCP_QUOTA_PROJECT_ID environment variable is not set"\n\
+    exit 1\n\
+fi\n\
+\n\
+echo "🔐 Setting up Google Cloud authentication..."\n\
+echo ""\n\
+echo "Configuration:"\n\
+echo "  GCP Project: $GCP_PROJECT_ID"\n\
+echo "  Quota Project: $GCP_QUOTA_PROJECT_ID"\n\
+echo ""\n\
+echo "This will:"\n\
+echo "  1. Initialize gcloud"\n\
+echo "  2. Set up application default credentials"\n\
+echo "  3. Configure quota project: $GCP_QUOTA_PROJECT_ID"\n\
+echo ""\n\
+\n\
+# Check if already authenticated\n\
+if gcloud auth application-default print-access-token &>/dev/null; then\n\
+    echo "✅ Already authenticated!"\n\
+    echo ""\n\
+    echo "Current configuration:"\n\
+    gcloud config list\n\
+else\n\
+    echo "Step 1: Initializing gcloud..."\n\
+    gcloud init\n\
+    \n\
+    echo ""\n\
+    echo "Step 2: Setting up application default credentials..."\n\
+    gcloud auth application-default login\n\
+    \n\
+    echo ""\n\
+    echo "Step 3: Setting quota project to: $GCP_QUOTA_PROJECT_ID"\n\
+    gcloud auth application-default set-quota-project "$GCP_QUOTA_PROJECT_ID"\n\
+    \n\
+    echo ""\n\
+    echo "✅ Authentication complete!"\n\
+fi\n\
+\n\
+# Set environment variables\n\
+export CLAUDE_CODE_USE_VERTEX=1\n\
+export CLOUD_ML_REGION=global\n\
+export ANTHROPIC_VERTEX_PROJECT_ID="$GCP_PROJECT_ID"\n\
+\n\
+echo ""\n\
+echo "Environment configured:"\n\
+echo "  CLAUDE_CODE_USE_VERTEX=1"\n\
+echo "  CLOUD_ML_REGION=global"\n\
+echo "  ANTHROPIC_VERTEX_PROJECT_ID=$GCP_PROJECT_ID"\n\
+echo ""\n\
+' > /usr/local/bin/setup-gcloud && chmod +x /usr/local/bin/setup-gcloud
+
 # Create an interactive Python session script
 RUN echo '#!/usr/bin/env python3\n\
-import google.generativeai as genai\n\
 import os\n\
+import sys\n\
+\n\
+# Set Vertex AI environment variables\n\
+os.environ["CLAUDE_CODE_USE_VERTEX"] = "1"\n\
+os.environ["CLOUD_ML_REGION"] = "global"\n\
+if gcp_project := os.getenv("GCP_PROJECT_ID"):\n\
+    os.environ["ANTHROPIC_VERTEX_PROJECT_ID"] = gcp_project\n\
+\n\
+import google.generativeai as genai\n\
+from google.cloud import aiplatform\n\
 import math\n\
 from datetime import datetime\n\
 import json\n\
 \n\
 print("\\n" + "="*70)\n\
-print("Python Interactive Session - Gemini SDK Pre-loaded")\n\
+print("Python Interactive Session - Vertex AI SDK Pre-loaded")\n\
 print("="*70)\n\
 print("\\nAvailable imports:")\n\
 print("  • genai (Google Generative AI SDK)")\n\
+print("  • aiplatform (Vertex AI SDK)")\n\
 print("  • math, datetime, os, json")\n\
+print("\\nEnvironment:")\n\
+print(f"  GCP_PROJECT_ID: {os.getenv('\''GCP_PROJECT_ID'\'', '\''not set'\'')}")\n\
+print(f"  GCP_QUOTA_PROJECT_ID: {os.getenv('\''GCP_QUOTA_PROJECT_ID'\'', '\''not set'\'')}")\n\
+print(f"  ANTHROPIC_VERTEX_PROJECT_ID: {os.getenv('\''ANTHROPIC_VERTEX_PROJECT_ID'\'', '\''not set'\'')}")\n\
 print("\\nQuick start:")\n\
-print("  genai.configure(api_key=None)  # Uses GOOGLE_API_KEY")\n\
+print("  # Initialize Vertex AI")\n\
+print("  aiplatform.init(project=os.getenv('\''GCP_PROJECT_ID'\''), location='\''us-central1'\'')")\n\
+print("  ")\n\
+print("  # Use Gemini")\n\
 print("  model = genai.GenerativeModel(\"gemini-1.5-pro\")")\n\
-print("  # Then use model.generate_content(...)")\n\
 print("\\n" + "="*70 + "\\n")\n\
 \n\
-if not os.getenv("GOOGLE_API_KEY"):\n\
-    print("⚠️  Warning: GOOGLE_API_KEY not set\\n")\n\
+if not os.getenv("GCP_PROJECT_ID"):\n\
+    print("⚠️  Warning: GCP_PROJECT_ID not set\\n")\n\
+elif not os.getenv("GCP_QUOTA_PROJECT_ID"):\n\
+    print("⚠️  Warning: GCP_QUOTA_PROJECT_ID not set\\n")\n\
 else:\n\
-    genai.configure(api_key=None)\n\
-    print("✓ Gemini SDK configured\\n")\n\
+    try:\n\
+        aiplatform.init(project=os.getenv("GCP_PROJECT_ID"), location="us-central1")\n\
+        print("✓ Vertex AI initialized\\n")\n\
+    except Exception as e:\n\
+        print(f"⚠️  Could not initialize Vertex AI: {e}\\n")\n\
 \n\
 # Start interactive Python\n\
 import code\n\
@@ -100,18 +219,42 @@ code.interact(local=locals())\n\
 
 # Create a runner script for examples
 RUN echo '#!/bin/bash\n\
-if [ -z "$GOOGLE_API_KEY" ]; then\n\
-    echo "❌ Error: GOOGLE_API_KEY environment variable is not set"\n\
+if [ -z "$GCP_PROJECT_ID" ]; then\n\
+    echo "❌ Error: GCP_PROJECT_ID environment variable is not set"\n\
     echo ""\n\
     echo "Run the container with:"\n\
-    echo "  podman run -it --rm -e GOOGLE_API_KEY=\"your-key\" ai-agent-gemini"\n\
+    echo "  podman run -it --rm \\\\"\n\
+    echo "    -e GCP_PROJECT_ID=\"your-project\" \\\\"\n\
+    echo "    -e GCP_QUOTA_PROJECT_ID=\"your-quota-project\" \\\\"\n\
+    echo "    ai-agent-gemini"\n\
     echo ""\n\
     exit 1\n\
 fi\n\
 \n\
+if [ -z "$GCP_QUOTA_PROJECT_ID" ]; then\n\
+    echo "❌ Error: GCP_QUOTA_PROJECT_ID environment variable is not set"\n\
+    echo ""\n\
+    echo "Run the container with:"\n\
+    echo "  podman run -it --rm \\\\"\n\
+    echo "    -e GCP_PROJECT_ID=\"your-project\" \\\\"\n\
+    echo "    -e GCP_QUOTA_PROJECT_ID=\"your-quota-project\" \\\\"\n\
+    echo "    ai-agent-gemini"\n\
+    echo ""\n\
+    exit 1\n\
+fi\n\
+\n\
+# Set environment variables\n\
+export CLAUDE_CODE_USE_VERTEX=1\n\
+export CLOUD_ML_REGION=global\n\
+export ANTHROPIC_VERTEX_PROJECT_ID="$GCP_PROJECT_ID"\n\
+\n\
 echo ""\n\
-echo "🤖 Running AI Agent Tutorial Examples (Gemini)"\n\
+echo "🤖 Running AI Agent Tutorial Examples (Vertex AI)"\n\
 echo "="*70\n\
+echo ""\n\
+echo "Configuration:"\n\
+echo "  GCP Project: $GCP_PROJECT_ID"\n\
+echo "  Quota Project: $GCP_QUOTA_PROJECT_ID"\n\
 echo ""\n\
 \n\
 if [ "$1" == "simple" ]; then\n\
@@ -124,10 +267,13 @@ elif [ "$1" == "tutorial" ]; then\n\
 elif [ "$1" == "interactive" ]; then\n\
     echo "Starting Python interactive session..."\n\
     python-interactive.py\n\
+elif [ "$1" == "setup" ]; then\n\
+    setup-gcloud\n\
 else\n\
-    echo "Usage: run-tutorial [simple|tutorial|interactive]"\n\
+    echo "Usage: run-tutorial [simple|tutorial|interactive|setup]"\n\
     echo ""\n\
     echo "Examples:"\n\
+    echo "  run-tutorial setup        - Set up gcloud authentication"\n\
     echo "  run-tutorial simple       - Run the simple example"\n\
     echo "  run-tutorial tutorial     - Open the full tutorial"\n\
     echo "  run-tutorial interactive  - Start Python REPL with SDK loaded"\n\
@@ -135,7 +281,9 @@ else\n\
 fi\n\
 ' > /usr/local/bin/run-tutorial && chmod +x /usr/local/bin/run-tutorial
 
-# Set environment variable for output directory
+# Set environment variables for Vertex AI
+ENV CLAUDE_CODE_USE_VERTEX=1
+ENV CLOUD_ML_REGION=global
 ENV OUTPUT_DIR=/app/output
 
 # Display welcome message and start bash
