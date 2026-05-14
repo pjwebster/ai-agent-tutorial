@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment
+.env
+.env.local
+*.key
+*.pem
+
+# Output files
+output/
+findings_*.txt
+*.csv
+*.json
+
+# Logs
+*.log
+
+# Container
+.containerignore
+
+# Documentation that's not needed in image (we include the tutorial files explicitly)
+# (none - we want all .md files)
